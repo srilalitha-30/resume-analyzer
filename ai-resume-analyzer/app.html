@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Resume Analyzer &mdash; Analyze</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="app-body">
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <div class="brand">
+      <span class="brand-mark">AR</span>
+      <span class="brand-name">AI Resume Analyzer</span>
+    </div>
+    <div class="topbar__right">
+      <span id="userEmail" class="user-email"></span>
+      <button id="logoutBtn" class="btn btn-ghost">Log out</button>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+
+  <section class="hero">
+    <h1>AI Resume Analyzer</h1>
+    <p>Upload your resume, pick a target role, and get an ATS-style report with a step-by-step career roadmap.</p>
+  </section>
+
+  <section class="feature-cards">
+    <div class="feature-card">
+      <div class="feature-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3"/><circle cx="10" cy="13" r="2.4"/><path d="m12 15 2.4 2.4"/></svg>
+      </div>
+      <h3>Skill Analysis</h3>
+      <p>Analyzes required technical and soft skills for your selected role.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.6 8.4 15.4 15.6" stroke-dasharray="2.5 2.5"/></svg>
+      </div>
+      <h3>Learning Roadmap</h3>
+      <p>Clear step-by-step guidance to grow your career path.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 2h6l1 4H8l1-4Z"/><path d="M6 6h12l-1 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 6Z"/><path d="M9.5 18.5 8 20"/></svg>
+      </div>
+      <h3>Project Ideas</h3>
+      <p>Real-world project ideas to strengthen your resume profile.</p>
+    </div>
+  </section>
+
+  <section class="upload-card">
+    <form id="analyzeForm">
+      <div class="upload-row">
+        <label class="file-drop" id="fileDrop">
+          <input type="file" id="resumeFile" name="file" accept=".pdf,.docx,.txt" required />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
+          <span id="fileLabel">Choose file &mdash; PDF, DOCX or TXT</span>
+        </label>
+
+        <select id="roleSelect" name="role" required>
+          <option value="" disabled selected>Select Role</option>
+        </select>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block btn-lg" id="analyzeBtn">
+        <span class="btn-text">Analyze Resume</span>
+      </button>
+
+      <p id="formError" class="form-error" hidden></p>
+    </form>
+  </section>
+
+  <section id="loadingState" class="loading-state" hidden>
+    <div class="spinner"></div>
+    <p id="loadingText">Reading your resume&hellip;</p>
+  </section>
+
+  <section id="resultsSection" class="results-section" hidden>
+
+    <div class="card score-card">
+      <div class="score-card__head">
+        <h2>ATS Score</h2>
+        <span id="employabilityBadge" class="badge">High Employability</span>
+      </div>
+      <div class="score-bar">
+        <div id="scoreBarFill" class="score-bar__fill" style="width:0%"></div>
+      </div>
+      <div id="scoreLabel" class="score-label">0/100</div>
+    </div>
+
+    <div class="triple-grid">
+      <div class="card">
+        <h3 class="card-title strengths">Strengths</h3>
+        <ul id="strengthsList" class="bullet-list"></ul>
+      </div>
+      <div class="card">
+        <h3 class="card-title weaknesses">Weaknesses</h3>
+        <ul id="weaknessesList" class="bullet-list"></ul>
+      </div>
+      <div class="card">
+        <h3 class="card-title improvements">Improvements</h3>
+        <ul id="improvementsList" class="bullet-list"></ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Professional Project Roadmap</h2>
+      <div id="projectRoadmap" class="roadmap-grid"></div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">Official Learning &amp; Career Roadmap</h2>
+
+      <h3 class="subsection-title">Authorized Learning Resources</h3>
+      <div class="resource-grid" id="resourceGrid"></div>
+
+      <h3 class="subsection-title">Official Weekly Schedule</h3>
+      <div class="schedule-grid" id="scheduleGrid"></div>
+
+      <h3 class="subsection-title">Career Execution Timeline</h3>
+      <div class="timeline-grid" id="timelineGrid"></div>
+    </div>
+
+    <div class="actions-row">
+      <button id="analyzeAnotherBtn" class="btn btn-outline">Analyze Another Resume</button>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <p>AI Resume Analyzer &middot; Built with FastAPI, OpenAI &amp; vanilla JS &middot; Deployed on Vercel</p>
+</footer>
+
+<script src="js/auth.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

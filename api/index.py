@@ -1,0 +1,307 @@
+"""
+AI Resume Analyzer - Backend API
+=================================
+FastAPI application that:
+  1. Accepts a resume file (PDF or DOCX) + a target job role
+  2. Extracts raw text from the resume
+  3. Sends the text to an LLM (OpenAI) with a structured prompt
+  4. Returns a structured JSON payload the frontend renders as:
+       - ATS Score
+       - Strengths / Weaknesses / Improvements
+       - Professional Project Roadmap
+       - Official Learning & Career Roadmap
+
+Deployed on Vercel as a single serverless function (ASGI app).
+"""
+
+import io
+import json
+import os
+import re
+from typing import List, Optional
+
+import pdfplumber
+from docx import Document
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# App setup
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+    title="AI Resume Analyzer API",
+    description="Analyzes resumes against a target job role using an LLM and returns an ATS-style report.",
+    version="1.0.0",
+)
+
+# Allow the static frontend (same domain on Vercel, or localhost while developing)
+# to call this API from the browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+ALLOWED_ROLES = [
+    "Frontend Developer",
+    "Backend Developer",
+    "Full Stack Developer",
+    "Data Analyst",
+    "Data Scientist",
+    "Machine Learning Engineer",
+    "DevOps Engineer",
+    "UI/UX Designer",
+    "Product Manager",
+    "QA / Test Engineer",
+]
+
+MAX_FILE_SIZE_MB = 5
+
+
+# ---------------------------------------------------------------------------
+# Response schema (kept in sync with the frontend renderer in js/app.js)
+# ---------------------------------------------------------------------------
+
+class ProjectIdea(BaseModel):
+    title: str
+    description: str
+
+
+class PlatformGroup(BaseModel):
+    learning_platforms: List[str]
+    practice_platforms: List[str]
+    documentation: List[str]
+    professional_channels: List[str]
+
+
+class WeeklySchedule(BaseModel):
+    weekdays: List[str]
+    saturday: List[str]
+    sunday: List[str]
+
+
+class CareerPhase(BaseModel):
+    title: str
+    description: str
+
+
+class CareerTimeline(BaseModel):
+    phase_1: CareerPhase
+    phase_2: CareerPhase
+    phase_3: CareerPhase
+
+
+class LearningRoadmap(BaseModel):
+    resources: PlatformGroup
+    weekly_schedule: WeeklySchedule
+    career_timeline: CareerTimeline
+
+
+class AnalysisResult(BaseModel):
+    ats_score: int = Field(ge=0, le=100)
+    employability_label: str
+    skill_analysis: dict
+    strengths: List[str]
+    weaknesses: List[str]
+    improvements: List[str]
+    project_roadmap: List[ProjectIdea]
+    learning_roadmap: LearningRoadmap
+    candidate_name: Optional[str] = None
+    target_role: str
+
+
+# ---------------------------------------------------------------------------
+# Resume text extraction
+# ---------------------------------------------------------------------------
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    text_chunks = []
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text() or ""
+            text_chunks.append(page_text)
+    return "\n".join(text_chunks).strip()
+
+
+def extract_text_from_docx(file_bytes: bytes) -> str:
+    document = Document(io.BytesIO(file_bytes))
+    return "\n".join(p.text for p in document.paragraphs).strip()
+
+
+def extract_resume_text(filename: str, file_bytes: bytes) -> str:
+    lower = filename.lower()
+    if lower.endswith(".pdf"):
+        text = extract_text_from_pdf(file_bytes)
+    elif lower.endswith(".docx"):
+        text = extract_text_from_docx(file_bytes)
+    elif lower.endswith(".txt"):
+        text = file_bytes.decode("utf-8", errors="ignore")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Please upload a PDF, DOCX, or TXT resume.",
+        )
+
+    if not text or len(text.strip()) < 40:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract readable text from this file. "
+            "If it's a scanned/image-based PDF, please upload a text-based resume.",
+        )
+    return text
+
+
+# ---------------------------------------------------------------------------
+# LLM analysis
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT = """You are an expert Applicant Tracking System (ATS) auditor and technical career coach.
+You analyze resumes against a specific target job role and return STRICT JSON only, matching the
+exact schema you are given. No prose, no markdown fences, no commentary outside the JSON object.
+Be honest and specific: base every point on the actual resume content and the target role,
+never invent companies, dates, or employers that are not in the resume."""
+
+
+def build_user_prompt(resume_text: str, role: str) -> str:
+    return f"""
+TARGET ROLE: {role}
+
+RESUME TEXT:
+\"\"\"
+{resume_text[:12000]}
+\"\"\"
+
+Analyze this resume for the target role above and return a single JSON object with EXACTLY
+this shape (fill every field, arrays should have 3-5 concise items each unless noted):
+
+{{
+  "candidate_name": "string or null if not found",
+  "ats_score": <integer 0-100, how well this resume would score in an ATS + recruiter screen for the target role>,
+  "employability_label": "one of: Low Employability | Moderate Employability | High Employability | Excellent Employability",
+  "skill_analysis": {{
+    "technical_skills_found": ["skills already on the resume relevant to the role"],
+    "soft_skills_found": ["soft skills evidenced by the resume"],
+    "missing_skills_for_role": ["important skills for the target role NOT found on the resume"]
+  }},
+  "strengths": ["3-5 concrete strengths, grounded in resume content"],
+  "weaknesses": ["3-5 concrete gaps or weaknesses relative to the target role"],
+  "improvements": ["3-5 specific, actionable improvements the candidate should make"],
+  "project_roadmap": [
+    {{"title": "Project name", "description": "One-sentence description of what to build and what it demonstrates"}},
+    {{"title": "Project name", "description": "..."}},
+    {{"title": "Project name", "description": "..."}}
+  ],
+  "learning_roadmap": {{
+    "resources": {{
+      "learning_platforms": ["4 real, well-known learning platforms suited to the role"],
+      "practice_platforms": ["4 real coding/practice platforms suited to the role"],
+      "documentation": ["4 real official docs/reference sites suited to the role"],
+      "professional_channels": ["4 real YouTube channels / communities suited to the role"]
+    }},
+    "weekly_schedule": {{
+      "weekdays": ["3 short daily study blocks, Mon-Fri"],
+      "saturday": ["3 short Saturday activities"],
+      "sunday": ["3 short Sunday activities"]
+    }},
+    "career_timeline": {{
+      "phase_1": {{"title": "Phase 1 (0-30 Days)", "description": "one sentence"}},
+      "phase_2": {{"title": "Phase 2 (30-60 Days)", "description": "one sentence"}},
+      "phase_3": {{"title": "Phase 3 (60-90 Days)", "description": "one sentence"}}
+    }}
+  }}
+}}
+
+Return ONLY the JSON object, nothing else.
+"""
+
+
+def call_llm(resume_text: str, role: str) -> dict:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfiguration: OPENAI_API_KEY is not set in the environment.",
+        )
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key)
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0.4,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_prompt(resume_text, role)},
+        ],
+    )
+
+    raw = response.choices[0].message.content
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Defensive fallback: strip any stray markdown fences and retry once.
+        cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        return json.loads(cleaned)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "service": "ai-resume-analyzer-api"}
+
+
+@app.get("/api/roles")
+def get_roles():
+    return {"roles": ALLOWED_ROLES}
+
+
+@app.post("/api/analyze", response_model=AnalysisResult)
+async def analyze_resume(
+    file: UploadFile = File(...),
+    role: str = Form(...),
+):
+    if role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(ALLOWED_ROLES)}")
+
+    file_bytes = await file.read()
+    size_mb = len(file_bytes) / (1024 * 1024)
+    if size_mb > MAX_FILE_SIZE_MB:
+        raise HTTPException(status_code=400, detail=f"File too large. Max size is {MAX_FILE_SIZE_MB}MB.")
+
+    resume_text = extract_resume_text(file.filename, file_bytes)
+
+    try:
+        result = call_llm(resume_text, role)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"AI analysis failed: {exc}") from exc
+
+    result["target_role"] = role
+
+    try:
+        validated = AnalysisResult(**result)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI returned an unexpected format: {exc}",
+        ) from exc
+
+    return validated
+
+
+# Local dev entrypoint: `uvicorn api.index:app --reload`
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

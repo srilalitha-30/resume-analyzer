@@ -69,10 +69,6 @@ a { color: var(--blue); }
   outline-offset: 2px;
 }
 
-/* ---------------------------------------------------------------------- */
-/* Brand                                                                  */
-/* ---------------------------------------------------------------------- */
-
 .brand {
   display: flex;
   align-items: center;
@@ -100,10 +96,6 @@ a { color: var(--blue); }
   font-size: 16px;
   color: var(--navy);
 }
-
-/* ---------------------------------------------------------------------- */
-/* Buttons                                                                */
-/* ---------------------------------------------------------------------- */
 
 .btn {
   font-family: 'Inter', sans-serif;
@@ -156,10 +148,6 @@ a { color: var(--blue); }
   border-color: var(--border);
 }
 .btn-google:hover { background: #fafbfe; }
-
-/* ==========================================================================
-   AUTH PAGE
-   ========================================================================== */
 
 .auth-body { background: var(--bg); }
 
@@ -257,8 +245,6 @@ input:focus, select:focus {
   text-align: center;
   line-height: 1.5;
 }
-
-/* --- Right visual panel --- */
 
 .auth-right {
   background: radial-gradient(120% 120% at 100% 0%, #1B2C5C 0%, var(--navy) 60%, #0A132D 100%);
@@ -390,10 +376,6 @@ input:focus, select:focus {
   .auth-right { order: -1; padding: 36px 24px; }
   .resume-card { width: 260px; }
 }
-
-/* ==========================================================================
-   APP PAGE
-   ========================================================================== */
 
 .topbar {
   background: #fff;
@@ -533,8 +515,6 @@ input:focus, select:focus {
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* --- Results --- */
 
 .results-section {
   display: flex;
@@ -697,4 +677,10 @@ input:focus, select:focus {
   padding: 26px 20px 40px;
   color: var(--text-muted);
   font-size: 12.5px;
+}
+
+/* Ensure [hidden] always wins over display:flex on these sections */
+.results-section[hidden],
+.loading-state[hidden] {
+  display: none !important;
 }

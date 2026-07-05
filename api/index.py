@@ -217,6 +217,34 @@ Return ONLY the JSON object, nothing else.
 """
 
 
+def parse_json_safely(raw: str) -> dict:
+    """Parse the model's JSON output, tolerating common minor formatting
+    slips (trailing commas, stray markdown fences)."""
+    candidates = [raw]
+
+    # Strip stray markdown code fences if present.
+    cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+    candidates.append(cleaned)
+
+    # Remove trailing commas before a closing ] or } — a common minor
+    # JSON mistake models make (valid in JS, invalid in strict JSON).
+    no_trailing_commas = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+    candidates.append(no_trailing_commas)
+
+    last_error: Optional[Exception] = None
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"AI analysis failed: the model's response could not be parsed as valid JSON ({last_error}). Please try analyzing again.",
+    )
+
+
 def call_llm(resume_text: str, role: str) -> dict:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -240,15 +268,12 @@ def call_llm(resume_text: str, role: str) -> dict:
         generation_config=genai.types.GenerationConfig(
             temperature=0.4,
             response_mime_type="application/json",
+            max_output_tokens=8192,
         ),
     )
 
     raw = response.text
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-        return json.loads(cleaned)
+    return parse_json_safely(raw)
 
 
 # ---------------------------------------------------------------------------

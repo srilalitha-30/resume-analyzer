@@ -4,7 +4,7 @@ AI Resume Analyzer - Backend API
 FastAPI application that:
   1. Accepts a resume file (PDF or DOCX) + a target job role
   2. Extracts raw text from the resume
-  3. Sends the text to an LLM (OpenAI) with a structured prompt
+  3. Sends the text to an LLM (Google Gemini) with a structured prompt
   4. Returns a structured JSON payload the frontend renders as:
        - ATS Score
        - Strengths / Weaknesses / Improvements
@@ -36,8 +36,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow the static frontend (same domain on Vercel, or localhost while developing)
-# to call this API from the browser.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -63,7 +61,7 @@ MAX_FILE_SIZE_MB = 5
 
 
 # ---------------------------------------------------------------------------
-# Response schema (kept in sync with the frontend renderer in js/app.js)
+# Response schema
 # ---------------------------------------------------------------------------
 
 class ProjectIdea(BaseModel):
@@ -156,7 +154,7 @@ def extract_resume_text(filename: str, file_bytes: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM analysis
+# LLM analysis (Google Gemini — free tier, no billing required)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are an expert Applicant Tracking System (ATS) auditor and technical career coach.
@@ -220,33 +218,35 @@ Return ONLY the JSON object, nothing else.
 
 
 def call_llm(resume_text: str, role: str) -> dict:
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="Server misconfiguration: OPENAI_API_KEY is not set in the environment.",
+            detail="Server misconfiguration: GEMINI_API_KEY is not set in the environment.",
         )
 
-    from openai import OpenAI
+    import google.generativeai as genai
 
-    client = OpenAI(api_key=api_key)
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    genai.configure(api_key=api_key)
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
-    response = client.chat.completions.create(
-        model=model,
-        temperature=0.4,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(resume_text, role)},
-        ],
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=SYSTEM_PROMPT,
     )
 
-    raw = response.choices[0].message.content
+    response = model.generate_content(
+        build_user_prompt(resume_text, role),
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.4,
+            response_mime_type="application/json",
+        ),
+    )
+
+    raw = response.text
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        # Defensive fallback: strip any stray markdown fences and retry once.
         cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
         return json.loads(cleaned)
 
